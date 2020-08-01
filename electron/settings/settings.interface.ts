@@ -87,6 +87,7 @@ export interface SettingsInterface {
                 party_info_pp: boolean;
                 party_info_lvl: boolean;
                 zaapsearchfilter: boolean;
+                pricecollector: boolean;
             },
             auto_group: {
                 active: boolean;

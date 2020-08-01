@@ -66,7 +66,8 @@
             "jobsxp": "Seviye atlamak için iş xp ihtiyacının görüntülenmesini etkinleştirin",
             "estimator": "Savaşta büyü hasarını tahmin etme",
             "hide-mount": "Savaş sırasında binekleri gizle",
-            "fightchronometer" : "Savaş kronometresini göster"
+            "fightchronometer" : "Savaş kronometresini göster",
+            "pricecollector" : "Oyun içi mağaza kullanırken fiyat toplamayı etkinleştirme"
           },
           "groups": {
             "header": "Gruplar"

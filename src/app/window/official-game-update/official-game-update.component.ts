@@ -12,6 +12,41 @@ const path = pathLib;
 const axios = axiosLib;
 const httpAdapter = httpAdapterLib;
 
+/**
+ * { "filename": difference }
+ * `difference` is equal to -1, 0 or 1 depending if the
+ * file is removed, unchanged, or changed
+ */
+interface Differences {
+   [key: string]: number;
+} 
+
+/**
+ * { "filename": "fileContent" }
+ */
+interface Files {
+   [key: string]: (string|Object);
+}
+
+interface ManifestFile {
+    filename: string,
+    version: string
+}
+
+interface ManifestFiles {
+    [key: string]: ManifestFile;
+}
+
+interface Manifest {
+    files: ManifestFiles
+}
+
+type RegexPatch = [string, string]
+
+interface RegexPatches {
+    [key: string]: RegexPatch[]
+}
+
 @Component({
     selector: 'component-official-game-update',
     templateUrl: './official-game-update.component.html',
@@ -22,11 +57,10 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
     public progressMode: string = "buffer";
     public progressValue: number = 0;
     public displayedProgress: number = 0;
-    private saveFile: any;
     public informations: string;
     private sub: Subscription;
 
-    private promiseQueueProcessingMax: number = 12;
+    private promiseQueueProcessingMax: number = 30;
     private promiseQueueProcessing: number = 0;
     private promiseQueue: any = [];
 
@@ -42,14 +76,14 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
     private remoteLindoManifestAlt: string = "http://api.no-emu.co/manifest.json";
     private remoteKeymaster: string = "https://raw.githubusercontent.com/madrobby/keymaster/master/keymaster.js";
     private remoteITunesAppVersion: string = (this.settingsService.option.general.early ? "https://itunes.apple.com/lookup?id=1245534439" : "https://itunes.apple.com/lookup?id=1041406978") + "&t=" + (new Date().getTime())
-    private currentLindoManifest: any;
-    private currentManifest: any;
-    private currentAssetMap: any;
-    private currentRegex: any;
+    private currentLindoManifest: Manifest;
+    private currentManifest: Manifest;
+    private currentAssetMap: Manifest;
+    private currentRegex: RegexPatches;
 
-    private lindoManifest: any;
-    private manifest: any;
-    private assetMap: any;
+    private lindoManifest: Manifest;
+    private manifest: Manifest;
+    private assetMap: Manifest;
 
     private versions: any;
 
@@ -81,8 +115,6 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
             try {
 
                 let promises = [];
-
-                promises.push(this.downloadKeymaster());
 
                 // Downloading manifests
                 this.log("Downloading manifests");
@@ -118,6 +150,19 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
                 this.computeProgressTotal(manifestDifferences, assetMapDifferences);
 
 
+                // Downloading lindo & game files
+
+                let [lindoMissingFiles, manifestMissingFiles] = await Promise.all([
+                    this.downloadMissingFiles(this.lindoManifest, lindoManifestDifferences),
+                    this.downloadMissingFiles(this.manifest, manifestDifferences, this.remoteOrigin)
+                ]);
+
+
+                // Downloading Keymaster
+
+                promises.push(this.downloadKeymaster());
+
+
                 // Downloading & saving assets
 
                 promises.push(this.downloadAndSaveMissingFiles(this.assetMap, assetMapDifferences, this.remoteOrigin));
@@ -132,25 +177,18 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
                 ]));
 
 
-                // Downloading lindo & game files
-
-                let [lindoMissingFiles, manifestMissingFiles] = await Promise.all([
-                    this.downloadMissingFiles(this.lindoManifest, lindoManifestDifferences),
-                    this.downloadMissingFiles(this.manifest, manifestDifferences, this.remoteOrigin)
-                ]);
-
-
+                // Downloading game script
 
                 promises.push((async (resolve, reject) => {
                     if (manifestMissingFiles["build/script.js"]) {
                         this.log("Getting new versions numbers");
                         if (this.versions == null)
                             this.versions = {};
-                        this.versions.buildVersion = manifestMissingFiles["build/script.js"].match(/window\.buildVersion\s?=\s?"(\d+\.\d+\.\d+(?:\-\d+)?)"/)[1];
+                        this.versions.buildVersion = (manifestMissingFiles["build/script.js"] as string).match(/window\.buildVersion\s?=\s?"(\d+\.\d+\.\d+(?:\-\d+)?)"/)[1];
                         this.versions.appVersion = await new Promise((resolve, reject) => {
-                            axios.get(this.remoteITunesAppVersion).then(response => {
+                            axios.get(this.remoteITunesAppVersion).then((response: any) => {
                                 resolve(response.data.results[0].version)
-                            }).catch(error => {
+                            }).catch((error: any) => {
                                 this.log(JSON.stringify(error, null, 2));
                                 reject(error);
                             });
@@ -167,7 +205,7 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
                     this.log("Applying regex...");
 
                     this.applyRegex(lindoManifestDifferences['regex.json'] == 1
-                        ? lindoMissingFiles['regex.json']
+                        ? (lindoMissingFiles['regex.json'] as RegexPatches)
                         : this.currentRegex,
                         manifestMissingFiles);
 
@@ -217,71 +255,56 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         this.sub.unsubscribe();
     }
 
-    loadCurrentLindoManifest() {
+    loadCurrentLindoManifest(): Promise<void> {
         return new Promise((resolve, reject) => {
-            fs.readFile(this.destinationPath + "lindoManifest.json", (err, data) => {
-                if (err) resolve(null);
-                else {
-                    this.currentLindoManifest = JSON.parse(data);
-                    resolve(data);
-                }
+            fs.readFile(this.destinationPath + "lindoManifest.json", (err: any, data: string) => {
+                if (!err) this.currentLindoManifest = JSON.parse(data);
+                resolve();
             });
         });
     }
 
-    loadCurrentManifest() {
+    loadCurrentManifest(): Promise<void> {
         return new Promise((resolve, reject) => {
-            fs.readFile(this.destinationPath + "manifest.json", (err, data) => {
-                if (err) resolve(null);
-                else {
-                    this.currentManifest = JSON.parse(data);
-                    resolve(data);
-                }
+            fs.readFile(this.destinationPath + "manifest.json", (err: any, data: string) => {
+                if (!err) this.currentManifest = JSON.parse(data);
+                resolve();
             });
         });
     }
 
-    loadCurrentAssetMap() {
+    loadCurrentAssetMap(): Promise<void> {
         return new Promise((resolve, reject) => {
-            fs.readFile(this.destinationPath + "assetMap.json", (err, data) => {
-                if (err) resolve(null);
-                else {
-                    this.currentAssetMap = JSON.parse(data);
-                    resolve(data);
-                }
+            fs.readFile(this.destinationPath + "assetMap.json", (err: any, data: string) => {
+                if (!err) this.currentAssetMap = JSON.parse(data);
+                resolve();
             });
         });
     }
 
-    loadVersions() {
+    loadVersions(): Promise<void> {
         return new Promise((resolve, reject) => {
-            fs.readFile(this.destinationPath + "versions.json", (err, data) => {
-                if (err) resolve(null);
-                else {
-                    this.versions = JSON.parse(data);
-                    resolve(data);
-                }
+            fs.readFile(this.destinationPath + "versions.json", (err: any, data: string) => {
+                if (!err) this.versions = JSON.parse(data);
+                resolve();
             });
         });
     }
 
-    loadCurrentRegex() {
+    loadCurrentRegex(): Promise<void> {
         return new Promise((resolve, reject) => {
-            fs.readFile(this.destinationPath + "regex.json", (err, data) => {
-                if (err) resolve(null);
-                else {
-                    this.currentRegex = JSON.parse(data);
-                    resolve(data);
-                }
+            fs.readFile(this.destinationPath + "regex.json", (err: any, data: string) => {
+                if (!err) this.currentRegex = JSON.parse(data);
+                resolve();
             });
         });
     }
 
-    download(url, json = false, weight = 1) {
+    download(url: string, json: boolean = false, weight: number = 1): Promise<any> {
         let currentProgress = 0;
         return new Promise((resolve, reject) => {
             axios.get(url, {
-                onDownloadProgress: (progressEvent) => {
+                onDownloadProgress: (progressEvent: any) => {
                     if (progressEvent.total) {
                         let percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
                         let progress = percentCompleted * weight;
@@ -289,17 +312,17 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
                         currentProgress = progress;
                     }
                 }
-            }).then(response => {
+            }).then((response: any) => {
                 this.addProgress(weight - currentProgress);
                 resolve(response.data);
-            }).catch(error => {
+            }).catch((error: any) => {
                 Logger.info(error);
                 reject(error);
-            })
+            });
         });
     }
 
-    async downloadLindoManifest() {
+    async downloadLindoManifest(): Promise<Manifest> {
         try {
             this.lindoManifest = await this.download(this.remoteLindoManifest, true);
             this.log("Lindo manifest downloaded");
@@ -309,13 +332,13 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         }
     }
 
-    async downloadLindoManifestAlt() {
+    async downloadLindoManifestAlt(): Promise<Manifest> {
         this.lindoManifest = await this.download(this.remoteLindoManifestAlt, true);
         this.log("Lindo manifest downloaded from alternative server");
         return this.lindoManifest;
     }
 
-    async downloadManifest() {
+    async downloadManifest(): Promise<Manifest> {
         try {
             this.manifest = await this.download(this.remoteOrigin + this.remoteManifestPath, true);
         } catch (e) {
@@ -327,15 +350,15 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         return this.manifest;
     }
 
-    async downloadAssetMap() {
+    async downloadAssetMap(): Promise<Manifest> {
         this.assetMap = await this.download(this.remoteOrigin + this.remoteAssetMapPath, true);
         this.log("Assets map downloaded");
         return this.assetMap;
     }
 
-    downloadKeymaster() {
+    downloadKeymaster(): Promise<void> {
         return new Promise((resolve, reject) => {
-            fs.readFile(this.destinationPath + "keymaster.js", async (err, data) => {
+            fs.readFile(this.destinationPath + "keymaster.js", async (err: any) => {
                 try {
                     if (err) {
                         let body = await this.download(this.remoteKeymaster);
@@ -348,12 +371,7 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         });
     }
 
-    /**
-     * { "filename": difference }
-     * 
-     * `difference` is equal to -1, 0 or 1 depending if the file is removed, unchanged, or changed
-     */
-    differences(manifestA, manifestB) {
+    differences(manifestA: Manifest, manifestB: Manifest): Differences {
         let differences = {};
 
         // If not present in previous manifest, or version different => New file
@@ -381,7 +399,7 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         return differences;
     }
 
-    computeProgressTotal(manifestDifferences, assetMapDifferences) {
+    computeProgressTotal(manifestDifferences: Differences, assetMapDifferences: Differences) {
         let total = 0;
         for (var i in manifestDifferences)
             if (manifestDifferences[i] == 1) total += this.getFileEstimatedWeight(i);
@@ -390,7 +408,7 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         this.totalProgress = total;
     }
 
-    addProgress(progress) {
+    addProgress(progress: number) {
         if (this.totalProgress > 0) {
             this.zone.run(() => {
                 this.progressMode = "determinate";
@@ -406,7 +424,7 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         });
     }
 
-    getFileEstimatedWeight(filename) {
+    getFileEstimatedWeight(filename: string) {
         switch (filename) {
             case "build/script.js":
                 return 100;
@@ -415,10 +433,7 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         }
     }
 
-    /**
-     * { "filename": "fileContent" }
-     */
-    async downloadMissingFiles(manifest, differences, basePath = "") {
+    async downloadMissingFiles(manifest: Manifest, differences: Differences, basePath: string = ""): Promise<Files> {
         let files = {};
         for (var i in differences) {
             if (differences[i] == 1) {
@@ -429,7 +444,7 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         return files;
     }
 
-    applyRegex(regex, files) {
+    applyRegex(regex: RegexPatches, files: Files) {
         for (let filename in regex) {
             if (files[filename]) {
                 if (/.js$/.test(filename)) {
@@ -439,35 +454,36 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
                     files[filename] = BeautifyCss(files[filename]);
                 }
                 for (let i in regex[filename]) {
-                    files[filename] = files[filename].replace(new RegExp(regex[filename][i][0], 'g'), regex[filename][i][1]);
+                    files[filename] = (files[filename] as string).replace(new RegExp(regex[filename][i][0], 'g'), regex[filename][i][1]);
                 }
             }
         }
     }
 
-    async saveFiles(files) {
+    async saveFiles(files: Files): Promise<void[]> {
         let promises = [];
         try {
             for (var filename in files) {
-                let fileContent = files[filename];
-                if (typeof fileContent == 'object') fileContent = JSON.stringify(fileContent);
+                let fileContent: string;
+                if (typeof files[filename] == 'object') fileContent = JSON.stringify(files[filename]);
+                else fileContent = (files[filename] as string);
                 promises.push(this.saveOneFile(this.destinationPath + filename, fileContent));
             }
         } catch (e) { Logger.error(e.message); }
         return await Promise.all(promises);
     }
 
-    saveOneFile(filePath, content) {
+    saveOneFile(filePath: string, content: string): Promise<void> {
         return new Promise((resolve, reject) => {
             this.ensureDirectoryExists(filePath);
-            fs.writeFile(filePath, content, err => {
+            fs.writeFile(filePath, content, (err: any) => {
                 if (err) reject(err);
                 else resolve();
             });
         });
     }
 
-    async downloadAndSaveMissingFiles(manifest, differences, basePath = "") {
+    async downloadAndSaveMissingFiles(manifest, differences: Differences, basePath: string = ""): Promise<void> {
         let promises = [];
         try {
             for (var i in differences) {
@@ -483,7 +499,7 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         return;
     }
 
-    queueNextFile(url, filePath) {
+    queueNextFile(url: string, filePath: string): Promise<void> {
         return new Promise((resolve, reject) => {
             this.queuePromise(() => {
                 return this.downloadAndSaveFile(url, filePath);
@@ -493,9 +509,9 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         });
     }
 
-    queuePromise(fct) {
+    queuePromise(fct: () => Promise<any>): Promise<void> {
         return new Promise((resolve, reject) => {
-            var retry = 0;
+            let retry = 0;
             let fctToRetry = () => {
                 this.promiseQueueProcessing++;
                 fct()
@@ -508,7 +524,7 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
                         else
                             reject();
                     })
-                    .finally(() => {
+                    .then(() => {
                         this.promiseQueueProcessing--;
                         this.processNextPromise();
                     });
@@ -525,36 +541,37 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         }
     }
 
-    downloadAndSaveFile(url, filePath) {
+    downloadAndSaveFile(url: string, filePath: string): Promise<void> {
         return new Promise((resolve, reject) => {
             try {
                 this.ensureDirectoryExists(filePath);
                 let fileStream = fs.createWriteStream(filePath);
+                fileStream.on('finish', () => {
+                    this.addProgress(1);
+                    resolve();
+                });
+                fileStream.on('error', (error: Error) => {
+                    reject(error.message);
+                });
                 axios.get(url, {
                     responseType: 'stream',
                     adapter: httpAdapter
-                }).then((response) => {
-                    const stream = response.data;
-                    stream.on('data', (chunk /* chunk is an ArrayBuffer */) => {
-                        fileStream.write(Buffer.from(chunk));
-                    });
-                    stream.on('end', () => {
-                        this.addProgress(1);
-                        fileStream.end();
-                        resolve();
-                    });
+                }).then((response: any) => {
+                    response.data.pipe(fileStream);
+                }).catch((error: any) => {
+                    reject(error);
                 });
             } catch (e) { Logger.error(e.message); reject(e.message); }
         });
     }
 
-    deleteOldFiles(differences) {
+    deleteOldFiles(differences: Differences): Promise<void[]> {
         var promises = [];
         for (var i in differences) {
             if (differences[i] == -1) {
                 ((filename) => {
                     promises.push(new Promise((resolve, reject) => {
-                        fs.unlink(this.destinationPath + filename, err => {
+                        fs.unlink(this.destinationPath + filename, (err: any) => {
                             try {
                                 if (err) {
                                     this.deleteFolderRecursive()
@@ -572,10 +589,9 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         return Promise.all(promises);
     }
 
-    async deleteFolderRecursive() {
-
+    async deleteFolderRecursive(): Promise<void> {
         if (fs.existsSync(this.destinationPath)) {
-            await fs.readdirSync(this.destinationPath).forEach((file, index) => {
+            await fs.readdirSync(this.destinationPath).forEach((file: string) => {
                 const curPath = path.join(this.destinationPath, file);
                 if (fs.lstatSync(curPath).isDirectory()) {
                     this.deleteFolderRecursive();
@@ -587,7 +603,7 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
         }
     }
 
-    ensureDirectoryExists(filePath) {
+    ensureDirectoryExists(filePath: string) {
         var dirname = path.dirname(filePath);
         if (fs.existsSync(dirname)) {
             return true;
@@ -597,11 +613,11 @@ export class OfficialGameUpdateComponent implements OnInit, OnDestroy {
     }
 
 
-    log(msg) {
+    log(msg: any) {
         Logger.info("[UPDATE] " + msg);
     }
 
-    fail(err) {
+    fail(err: any) {
         Logger.error(err);
         this.zone.run(() => {
             this.translate.get('app.window.update-dofus.information.error').subscribe((res: string) => {

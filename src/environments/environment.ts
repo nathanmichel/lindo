@@ -1,16 +1,16 @@
 export const environment = {
-  envName: 'dev',
+  envName: "dev",
   production: false,
   appName: "Lindo",
   websiteUrl: "http://lindo.no-emu.co",
   apiUrl: "http://api.no-emu.co",
-  firebaseConfig: {
-    apiKey: "AIzaSyC0C7MGcoyCMYoPqiD0NveEafZRaF-bin8",
-    authDomain: "dt-price.firebaseapp.com",
-    databaseURL: "https://dt-price.firebaseio.com",
-    projectId: "dt-price",
-    storageBucket: "dt-price.appspot.com",
-    messagingSenderId: "117556323617",
-    appId: "1:117556323617:web:9b8b0b1fddf8fb9998ca60"
-  }
+  firebaseTerracogita: {
+    apiKey: "AIzaSyCmK27yYcr2Ap2VBFtY1OjBTxtjJl_1UjI",
+    authDomain: "dt-price-farm-1.firebaseapp.com",
+    databaseURL: "https://dt-price-farm-1.firebaseio.com",
+    projectId: "dt-price-farm-1",
+    storageBucket: "dt-price-farm-1.appspot.com",
+    messagingSenderId: "787288518512",
+    appId: "1:787288518512:web:a7e319fce96d30160029b5"
+  }
 };

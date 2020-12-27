@@ -1,11 +1,12 @@
 import { Mod } from "../mod";
 import { Logger } from "app/core/electron/logger.helper";
 import { environment } from '../../../../environments/environment';
-const firebase = require("firebase");
-require("firebase/firestore");
+import * as firebase from "firebase";
+import "firebase/firestore";
 
 export class PriceCollector extends Mod {
   private db: any;
+  private server: number = this.wGame.gui.serversData.connectedServerId;
   private data: any[] = [];
   private dataPushed: any = {};
 
@@ -13,7 +14,8 @@ export class PriceCollector extends Mod {
     this.params = this.settings.option.vip.general.pricecollector;
     if (this.params) {
       Logger.info("- enable Price-Collector");
-      firebase.initializeApp(environment.firebaseTerracogita);
+      if (firebase.apps.length === 0) // Eviter d'init une app déjà init
+        firebase.initializeApp(environment.firebaseTerracogita);
       this.db = firebase.firestore();
       this.on(this.wGame.dofus.connectionManager, 'ExchangeTypesItemsExchangerDescriptionForUserMessage', this.getPrice.bind(this));
       this.on(this.wGame.dofus.connectionManager, 'ExchangeBidhouseMinimumItemPriceListMessage', this.getPriceWithMin.bind(this));
@@ -31,7 +33,7 @@ export class PriceCollector extends Mod {
         seed  = ((seed << 5) - seed) + chr;
         seed |= 0; // Convert to 32bit integer
       }
-      this.db.collection("prices").add({ author: seed, data: this.data });
+      this.db.collection("prices").add({ author: seed, data: this.data, server: this.server });
       this.data = [];
     }
   }
